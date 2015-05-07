@@ -155,8 +155,14 @@ typedef struct VideoEncoderRateControlCbs {
  * @return:            A pointer to a structure implementing the VideoEncoder
  *                     methods.
  */
+typedef VIDEO_ENCODER_T* (*create_video_encoder_proc)(uint64_t starting_bit_rate, VideoEncoderRateControlCbs *cbs, void *cbs_opaque);
+
 VIDEO_ENCODER_T* create_mjpeg_encoder(uint64_t starting_bit_rate,
                                       VideoEncoderRateControlCbs *cbs,
                                       void *cbs_opaque);
+
+VIDEO_ENCODER_T* create_gstreamer_encoder(uint64_t starting_bit_rate,
+                                          VideoEncoderRateControlCbs *cbs,
+                                          void *cbs_opaque);
 
 #endif
