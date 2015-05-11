@@ -27,6 +27,7 @@
 #include <sys/socket.h>
 #include <signal.h>
 #include <inttypes.h>
+#include <ctype.h>
 
 #include <spice/qxl_dev.h>
 #include "common/quic.h"
@@ -214,43 +215,155 @@ static void red_dispatcher_cursor_migrate(RedChannelClient *rcc)
                             &payload);
 }
 
-typedef struct RendererInfo {
-    int id;
+typedef struct {
+    uint32_t id;
     const char *name;
-} RendererInfo;
+} EnumNames;
 
-static RendererInfo renderers_info[] = {
+static int name_to_enum(const EnumNames names[], const char *string, uint32_t *id)
+{
+    if (string) {
+        int i = 0;
+        while (names[i].name) {
+            if (strcmp(string, names[i].name) == 0)
+            {
+                *id = names[i].id;
+                return TRUE;
+            }
+            i++;
+        }
+    }
+    return FALSE;
+}
+
+static const EnumNames renderer_names[] = {
     {RED_RENDERER_SW, "sw"},
 #ifdef USE_OPENGL
     {RED_RENDERER_OGL_PBUF, "oglpbuf"},
     {RED_RENDERER_OGL_PIXMAP, "oglpixmap"},
 #endif
-    {RED_RENDERER_INVALID, NULL},
+    {0, NULL},
 };
 
 static uint32_t renderers[RED_MAX_RENDERERS];
 static uint32_t num_renderers = 0;
 
-static RendererInfo *find_renderer(const char *name)
+int red_dispatcher_add_renderer(const char *name)
 {
-    RendererInfo *inf = renderers_info;
-    while (inf->name) {
-        if (strcmp(name, inf->name) == 0) {
-            return inf;
+    uint32_t renderer;
+
+    if (num_renderers == RED_MAX_RENDERERS ||
+        !name_to_enum(renderer_names, name, &renderer))
+        return FALSE;
+    renderers[num_renderers++] = renderer;
+    return TRUE;
+}
+
+static const EnumNames video_encoder_names[] = {
+    {0, "spice"},
+    {1, "gstreamer"},
+    {0, NULL},
+};
+
+static create_video_encoder_proc video_encoder_procs[] = {
+    &create_mjpeg_encoder,
+#ifdef HAVE_GSTREAMER_0_10
+    &create_gstreamer_encoder,
+#else
+    NULL,
+#endif
+};
+
+static const EnumNames video_codec_names[] = {
+    {SPICE_VIDEO_CODEC_TYPE_MJPEG, "mjpeg"},
+    {SPICE_VIDEO_CODEC_TYPE_VP8, "vp8"},
+    {0, NULL},
+};
+
+static const EnumNames video_cap_names[] = {
+    {SPICE_DISPLAY_CAP_CODEC_MJPEG, "mjpeg"},
+    {SPICE_DISPLAY_CAP_CODEC_VP8, "vp8"},
+    {0, NULL},
+};
+
+
+static RedVideoCodec video_codecs[RED_MAX_VIDEO_CODECS];
+static int num_video_codecs = -1;
+
+/* Expected string:  encoder:codec;encoder:codec */
+static const char* parse_video_codecs(const char *codecs, char **encoder,
+                                      char **codec)
+{
+    const char* e;
+    while (*codecs == ';')
+        codecs++;
+    if (!*codecs)
+        return NULL;
+    e = codecs;
+    while (isalnum(*codecs) || *codecs == '_')
+        codecs++;
+    if (*codecs == ':')
+    {
+        const char* c = ++codecs;
+        while (isalnum(*codecs) || *codecs == '_')
+            codecs++;
+        if (!*codecs || *codecs == ';')
+        {
+            int len = c - e - 1;
+            *encoder = malloc(len + 1);
+            strncpy(*encoder, e, len);
+            (*encoder)[len] = '\0';
+
+            len =  codecs - c;
+            *codec = malloc(len + 1);
+            strncpy(*codec, c, len);
+            (*codec)[len] = '\0';
+            return codecs;
         }
-        inf++;
     }
+    spice_warning("spice: invalid encoder:codec value: %s", e);
     return NULL;
 }
 
-int red_dispatcher_add_renderer(const char *name)
+int red_dispatcher_set_video_codecs(const char *codecs)
 {
-    RendererInfo *inf;
+    uint32_t encoder;
+    SpiceVideoCodecType type;
+    uint32_t cap;
+    char *encoder_name, *codec_name;
+    static RedVideoCodec new_codecs[RED_MAX_VIDEO_CODECS];
+    int count;
+    const char* c;
 
-    if (num_renderers == RED_MAX_RENDERERS || !(inf = find_renderer(name))) {
-        return FALSE;
+    if (strcmp(codecs, "auto") == 0)
+        codecs = VIDEO_ENCODER_DEFAULT_PREFERENCE;
+
+    c = codecs;
+    count = 0;
+    while ( (c = parse_video_codecs(c, &encoder_name, &codec_name)) ) {
+        int convert_failed = FALSE;
+        if (count == RED_MAX_VIDEO_CODECS ||
+            !name_to_enum(video_encoder_names, encoder_name, &encoder) ||
+            !name_to_enum(video_codec_names, codec_name, &type) ||
+            !name_to_enum(video_cap_names, codec_name, &cap))
+            convert_failed = TRUE;
+
+        free(encoder_name);
+        free(codec_name);
+
+        if (convert_failed)
+            return FALSE;
+        if (!video_encoder_procs[encoder])
+            /* A valid but unsupported video encoder, skip it */
+            continue;
+
+        new_codecs[count].create = video_encoder_procs[encoder];
+        new_codecs[count].type = type;
+        new_codecs[count].cap = cap;
+        count++;
     }
-    renderers[num_renderers++] = inf->id;
+    num_video_codecs = count;
+    memcpy(video_codecs, new_codecs, sizeof(video_codecs));
     return TRUE;
 }
 
@@ -793,6 +906,22 @@ void red_dispatcher_on_sv_change(void)
     }
 }
 
+void red_dispatcher_on_vc_change(void)
+{
+    RedWorkerMessageSetVideoCodecs payload;
+    int compression_level = calc_compression_level();
+    RedDispatcher *now = dispatchers;
+    while (now) {
+        now->qxl->st->qif->set_compression_level(now->qxl, compression_level);
+        payload.num_video_codecs = num_video_codecs;
+        payload.video_codecs = video_codecs;
+        dispatcher_send_message(&now->dispatcher,
+                                RED_WORKER_MESSAGE_SET_VIDEO_CODECS,
+                                &payload);
+        now = now->next;
+    }
+}
+
 void red_dispatcher_set_mouse_mode(uint32_t mode)
 {
     RedWorkerMessageSetMouseMode payload;
@@ -1094,6 +1223,10 @@ void red_dispatcher_init(QXLInstance *qxl)
     init_data.pending = &red_dispatcher->pending;
     init_data.num_renderers = num_renderers;
     memcpy(init_data.renderers, renderers, sizeof(init_data.renderers));
+    if (num_video_codecs < 0)
+        red_dispatcher_set_video_codecs("auto");
+    init_data.num_video_codecs = num_video_codecs;
+    memcpy(init_data.video_codecs, video_codecs, sizeof(init_data.video_codecs));
 
     pthread_mutex_init(&red_dispatcher->async_lock, NULL);
     init_data.image_compression = image_compression;

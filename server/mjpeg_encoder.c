@@ -210,7 +210,8 @@ static inline int rate_control_is_active(MJpegEncoder* encoder)
     return encoder->cbs.get_roundtrip_ms != NULL;
 }
 
-MJpegEncoder *create_mjpeg_encoder(uint64_t starting_bit_rate,
+MJpegEncoder *create_mjpeg_encoder(SpiceVideoCodecType codec_type,
+                                   uint64_t starting_bit_rate,
                                    VideoEncoderRateControlCbs *cbs,
                                    void *cbs_opaque)
 {
@@ -218,6 +219,8 @@ MJpegEncoder *create_mjpeg_encoder(uint64_t starting_bit_rate,
 
     spice_assert(!cbs || (cbs && cbs->get_roundtrip_ms && cbs->get_source_fps));
 
+    if (codec_type != SPICE_VIDEO_CODEC_TYPE_MJPEG)
+        return NULL;
     enc = spice_new0(MJpegEncoder, 1);
 
     enc->base.destroy = &mjpeg_encoder_destroy;
@@ -226,6 +229,7 @@ MJpegEncoder *create_mjpeg_encoder(uint64_t starting_bit_rate,
     enc->base.notify_server_frame_drop = &mjpeg_encoder_notify_server_frame_drop;
     enc->base.get_bit_rate = &mjpeg_encoder_get_bit_rate;
     enc->base.get_stats = &mjpeg_encoder_get_stats;
+    enc->base.codec_type = codec_type;
     enc->first_frame = TRUE;
     enc->rate_control.byte_rate = starting_bit_rate / 8;
     enc->starting_bit_rate = starting_bit_rate;

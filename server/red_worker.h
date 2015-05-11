@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include "red_common.h"
+#include "video_encoder.h"
 
 enum {
     RED_WORKER_PENDING_WAKEUP,
@@ -69,6 +70,7 @@ enum {
 
     RED_WORKER_MESSAGE_MONITORS_CONFIG_ASYNC,
     RED_WORKER_MESSAGE_DRIVER_UNLOAD,
+    RED_WORKER_MESSAGE_SET_VIDEO_CODECS,
 
     RED_WORKER_MESSAGE_COUNT // LAST
 };
@@ -84,6 +86,20 @@ enum {
     RED_RENDERER_OGL_PIXMAP,
 };
 
+#define RED_MAX_VIDEO_CODECS 8
+
+typedef struct RedVideoCodec {
+    create_video_encoder_proc create;
+    SpiceVideoCodecType type;
+    uint32_t cap;
+} RedVideoCodec;
+
+enum {
+    SPICE_STREAMING_INVALID,
+    SPICE_STREAMING_SPICE,
+    SPICE_STREAMING_GSTREAMER
+};
+
 typedef struct RedDispatcher RedDispatcher;
 
 typedef struct WorkerInitData {
@@ -96,6 +112,8 @@ typedef struct WorkerInitData {
     spice_wan_compression_t jpeg_state;
     spice_wan_compression_t zlib_glz_state;
     int streaming_video;
+    uint32_t num_video_codecs;
+    RedVideoCodec video_codecs[RED_MAX_VIDEO_CODECS];
     uint32_t num_memslots;
     uint32_t num_memslots_groups;
     uint8_t memslot_gen_bits;

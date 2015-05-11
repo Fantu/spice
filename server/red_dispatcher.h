@@ -22,6 +22,7 @@
 
 struct RedChannelClient;
 struct RedDispatcher;
+typedef struct RedVideoCodec RedVideoCodec;
 typedef struct AsyncCommand AsyncCommand;
 
 void red_dispatcher_init(QXLInstance *qxl);
@@ -29,11 +30,13 @@ void red_dispatcher_init(QXLInstance *qxl);
 void red_dispatcher_set_mm_time(uint32_t);
 void red_dispatcher_on_ic_change(void);
 void red_dispatcher_on_sv_change(void);
+void red_dispatcher_on_vc_change(void);
 void red_dispatcher_set_mouse_mode(uint32_t mode);
 void red_dispatcher_on_vm_stop(void);
 void red_dispatcher_on_vm_start(void);
 int red_dispatcher_count(void);
 int red_dispatcher_add_renderer(const char *name);
+int red_dispatcher_set_video_codecs(const char* codecs);
 uint32_t red_dispatcher_qxl_ram_size(void);
 int red_dispatcher_qxl_count(void);
 void red_dispatcher_async_complete(struct RedDispatcher *, AsyncCommand *);
@@ -173,6 +176,11 @@ typedef struct RedWorkerMessageSetCompression {
 typedef struct RedWorkerMessageSetStreamingVideo {
     uint32_t streaming_video;
 } RedWorkerMessageSetStreamingVideo;
+
+typedef struct RedWorkerMessageSetVideoCodecs {
+    uint32_t num_video_codecs;
+    RedVideoCodec* video_codecs;
+} RedWorkerMessageSetVideoCodecs;
 
 typedef struct RedWorkerMessageSetMouseMode {
     uint32_t mode;
