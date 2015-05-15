@@ -91,13 +91,23 @@ if test "x$enable_smartcard" = "xyes"; then
    AC_DEFINE([USE_SMARTCARD], [1], [Define if supporting smartcard proxying])
 fi
 
-AC_ARG_ENABLE(gstreamer-0.10,
-[  --enable-gstreamer-0.10   Enable GStreamer 0.10 support],,
-[enable_gstreamer_0_10="yes"])
-AS_IF([test x"$enable_gstreamer_0_10" != "xno"], [enable_gstreamer_0_10="yes"])
-AM_CONDITIONAL(SUPPORT_GSTREAMER_0_10, test "x$enable_gstreamer_0_10" != "xno")
-if test "x$enable_gstreamer_0_10" = "xyes"; then
-   AC_DEFINE([HAVE_GSTREAMER_0_10], [1], [Define if supporting GStreamer 0.10])
+AC_ARG_ENABLE(gstreamer-1.0,
+[  --enable-gstreamer-1.0   Enable GStreamer 1.0 support],,
+[enable_gstreamer_1_0="yes"])
+AS_IF([test x"$enable_gstreamer_1_0" != "xno"], [enable_gstreamer_1_0="yes"])
+AM_CONDITIONAL(SUPPORT_GSTREAMER_1_0, test "x$enable_gstreamer_1_0" != "xno")
+if test "x$enable_gstreamer_1_0" = "xyes"; then
+    AC_DEFINE([HAVE_GSTREAMER_1_0], [1], [Define if supporting GStreamer 1.0])
+    AM_CONDITIONAL(SUPPORT_GSTREAMER_0_10, false)
+else
+    AC_ARG_ENABLE(gstreamer-0.10,
+    [  --enable-gstreamer-0.10   Enable GStreamer 0.10 support],,
+    [enable_gstreamer_0_10="yes"])
+    AS_IF([test x"$enable_gstreamer_0_10" != "xno"], [enable_gstreamer_0_10="yes"])
+    AM_CONDITIONAL(SUPPORT_GSTREAMER_0_10, test "x$enable_gstreamer_0_10" != "xno")
+    if test "x$enable_gstreamer_0_10" = "xyes"; then
+        AC_DEFINE([HAVE_GSTREAMER_0_10], [1], [Define if supporting GStreamer 0.10])
+    fi
 fi
 
 AC_ARG_ENABLE(automated_tests,
@@ -136,7 +146,13 @@ if test "x$enable_smartcard" = "xyes"; then
     AS_VAR_APPEND([SPICE_REQUIRES], [" libcacard >= 0.1.2"])
 fi
 
-if test "x$enable_gstreamer_0_10" = "xyes"; then
+if test "x$enable_gstreamer_1_0" = "xyes"; then
+    PKG_CHECK_MODULES(GSTREAMER_1_0, [gstreamer-1.0, gstreamer-app-1.0])
+    AC_SUBST(GSTREAMER_1_0_LIBS)
+    AC_SUBST(GSTREAMER_1_0_CFLAGS)
+    AS_VAR_APPEND([SPICE_REQUIRES], [" gstreamer-1.0"])
+
+elif test "x$enable_gstreamer_0_10" = "xyes"; then
     PKG_CHECK_MODULES(GSTREAMER_0_10, [gstreamer-0.10, gstreamer-app-0.10])
     AC_SUBST(GSTREAMER_0_10_LIBS)
     AC_SUBST(GSTREAMER_0_10_CFLAGS)
@@ -376,6 +392,8 @@ echo "
         Smartcard:                ${enable_smartcard}
 
         GStreamer-0.10:           ${enable_gstreamer_0_10}
+
+        GStreamer-1.0:            ${enable_gstreamer_1_0}
 
         SASL support:             ${enable_sasl}
 
