@@ -42,6 +42,7 @@ typedef struct {
 
 struct GstEncoder {
     VideoEncoder base;
+    const gchar* gstenc_name;
 
     /* The GStreamer pipeline. If pipeline is NULL then the other pointers are
      * invalid.
@@ -139,11 +140,11 @@ static void adjust_bit_rate(GstEncoder *encoder)
     {
         /* Even MJPEG should achieve good quality with a 10x compression level */
         encoder->bit_rate = raw_bit_rate / 10;
-        spice_debug("capping the bit rate to %.2fMbps for a 10x compression level", ((double)encoder->bit_rate) / 1024 / 1024);
+        spice_debug("capping the %s bit rate to %.2fMbps for a 10x compression level", encoder->gstenc_name, ((double)encoder->bit_rate) / 1024 / 1024);
     }
     else
     {
-        spice_debug("setting the bit rate to %.2fMbps for a %dx compression level", ((double)encoder->bit_rate) / 1024 / 1024, compression);
+        spice_debug("setting the %s bit rate to %.2fMbps for a %dx compression level", encoder->gstenc_name, ((double)encoder->bit_rate) / 1024 / 1024, compression);
     }
 }
 
@@ -177,9 +178,12 @@ static int construct_pipeline(GstEncoder *encoder, const SpiceBitmap *bitmap)
 {
     GstStateChangeReturn ret;
     GError *err;
+    gchar *desc;
 
     err = NULL;
-    encoder->pipeline = gst_parse_launch_full("appsrc name=src is-live=1 ! ffmpegcolorspace ! ffenc_mjpeg name=encoder ! appsink name=sink", NULL, GST_PARSE_FLAG_FATAL_ERRORS, &err);
+    desc = g_strdup_printf("appsrc name=src is-live=1 ! ffmpegcolorspace ! %s name=encoder ! appsink name=sink", encoder->gstenc_name);
+    encoder->pipeline = gst_parse_launch_full(desc, NULL, GST_PARSE_FLAG_FATAL_ERRORS, &err);
+    g_free(desc);
     if (!encoder->pipeline)
     {
         spice_warning("GStreamer error: %s", err->message);
@@ -190,14 +194,17 @@ static int construct_pipeline(GstEncoder *encoder, const SpiceBitmap *bitmap)
     encoder->gstenc = gst_bin_get_by_name(GST_BIN(encoder->pipeline), "encoder");
     encoder->appsink = GST_APP_SINK(gst_bin_get_by_name(GST_BIN(encoder->pipeline), "sink"));
 
+    /* Set the encoder initial bit rate, and ask for a low latency */
+    adjust_bit_rate(encoder);
+    g_object_set(G_OBJECT(encoder->gstenc), "bitrate", encoder->bit_rate, NULL);
+    g_object_set(G_OBJECT(encoder->gstenc), "max-latency", 0, NULL);
+    g_object_set(G_OBJECT(encoder->gstenc), "max-keyframe-distance", 0, NULL);
+    g_object_set(G_OBJECT(encoder->gstenc), "lag-in-frames", 0, NULL);
+
     /* Set the source caps */
     encoder->src_caps = NULL;
     if (!set_appsrc_caps(encoder))
         return FALSE;
-
-    /* Set the encoder initial bit rate */
-    adjust_bit_rate(encoder);
-    g_object_set(G_OBJECT(encoder->gstenc), "bitrate", encoder->bit_rate, NULL);
 
     /* Start playing */
     gst_pipeline_use_clock(GST_PIPELINE(encoder->pipeline), NULL);
@@ -210,16 +217,18 @@ static int construct_pipeline(GstEncoder *encoder, const SpiceBitmap *bitmap)
     return TRUE;
 }
 
-static int reconfigure_pipeline(GstEncoder *encoder)
+static void reconfigure_pipeline(GstEncoder *encoder)
 {
-    if (gst_element_set_state(encoder->pipeline, GST_STATE_PAUSED) == GST_STATE_CHANGE_FAILURE ||
-        !set_appsrc_caps(encoder) ||
-        gst_element_set_state(encoder->pipeline, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
-        spice_warning("GStreamer error: the pipeline reconfiguration failed");
+    if (encoder->base.codec_type == SPICE_VIDEO_CODEC_TYPE_VP8) {
+        /* vp8enc gets confused if we try to reconfigure the pipeline */
         reset_pipeline(encoder);
-        return FALSE;
     }
-    return TRUE;
+    else if (gst_element_set_state(encoder->pipeline, GST_STATE_PAUSED) == GST_STATE_CHANGE_FAILURE ||
+             !set_appsrc_caps(encoder) ||
+             gst_element_set_state(encoder->pipeline, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
+        spice_debug("GStreamer error: the pipeline reconfiguration failed, rebuilding it instead");
+        reset_pipeline(encoder); /* we can rebuild it... */
+    }
 }
 
 static inline uint8_t *get_image_line(SpiceChunks *chunks, size_t *offset,
@@ -250,7 +259,7 @@ static inline uint8_t *get_image_line(SpiceChunks *chunks, size_t *offset,
 
 
 static int push_raw_frame(GstEncoder *encoder, const SpiceBitmap *bitmap,
-                          const SpiceRect *src, int top_down)
+                          const SpiceRect *src, int top_down, uint32_t frame_time)
 {
     SpiceChunks *chunks;
     uint32_t image_stride;
@@ -298,8 +307,17 @@ static int push_raw_frame(GstEncoder *encoder, const SpiceBitmap *bitmap,
     /* The GStreamer buffer timestamps and framerate are irrelevant and would
      * be hard to set right because they can arrive a bit irregularly
      */
-    GST_BUFFER_TIMESTAMP(buffer) = GST_CLOCK_TIME_NONE;
-    GST_BUFFER_DURATION(buffer) = GST_CLOCK_TIME_NONE;
+    if (encoder->base.codec_type == SPICE_VIDEO_CODEC_TYPE_VP8)
+    {
+        /* FIXME: Maybe try drop-frame = 0 instead? */
+        GST_BUFFER_TIMESTAMP(buffer) = frame_time;
+        GST_BUFFER_DURATION(buffer) = 1;
+    }
+    else
+    {
+        GST_BUFFER_TIMESTAMP(buffer) = GST_CLOCK_TIME_NONE;
+        GST_BUFFER_DURATION(buffer) = GST_CLOCK_TIME_NONE;
+    }
     GST_BUFFER_OFFSET(buffer) = encoder->frame++;
     gst_buffer_set_caps(buffer, encoder->src_caps);
 
@@ -364,13 +382,13 @@ static int gst_encoder_encode_frame(GstEncoder *encoder,
         encoder->spice_format = bitmap->format;
         encoder->width = width;
         encoder->height = height;
-        if (encoder->pipeline && !reconfigure_pipeline(encoder))
-            return VIDEO_ENCODER_FRAME_UNSUPPORTED;
+        if (encoder->pipeline)
+            reconfigure_pipeline(encoder);
     }
     if (!encoder->pipeline && !construct_pipeline(encoder, bitmap))
         return VIDEO_ENCODER_FRAME_DROP;
 
-    rc = push_raw_frame(encoder, bitmap, src, top_down);
+    rc = push_raw_frame(encoder, bitmap, src, top_down, frame_mm_time);
     if (rc == VIDEO_ENCODER_FRAME_ENCODE_DONE)
         rc = pull_compressed_buffer(encoder, outbuf, outbuf_size, data_size);
     return rc;
@@ -413,11 +431,24 @@ void gst_encoder_get_stats(GstEncoder *encoder, VideoEncoderStats *stats)
         stats->avg_quality = 0;
 }
 
-GstEncoder *create_gstreamer_encoder(uint64_t starting_bit_rate, VideoEncoderRateControlCbs *cbs, void *cbs_opaque)
+GstEncoder *create_gstreamer_encoder(SpiceVideoCodecType codec_type, uint64_t starting_bit_rate, VideoEncoderRateControlCbs *cbs, void *cbs_opaque)
 {
     GstEncoder *encoder;
+    const gchar *gstenc_name;
 
     spice_assert(!cbs || (cbs && cbs->get_roundtrip_ms && cbs->get_source_fps));
+    switch (codec_type)
+    {
+    case SPICE_VIDEO_CODEC_TYPE_MJPEG:
+        gstenc_name = "ffenc_mjpeg";
+        break;
+    case SPICE_VIDEO_CODEC_TYPE_VP8:
+        gstenc_name = "vp8enc";
+        break;
+    default:
+        spice_warning("unsupported codec type %d", codec_type);
+        return NULL;
+    }
 
     gst_init(NULL, NULL);
 
@@ -428,6 +459,8 @@ GstEncoder *create_gstreamer_encoder(uint64_t starting_bit_rate, VideoEncoderRat
     encoder->base.notify_server_frame_drop = &gst_encoder_notify_server_frame_drop;
     encoder->base.get_bit_rate = &gst_encoder_get_bit_rate;
     encoder->base.get_stats = &gst_encoder_get_stats;
+    encoder->base.codec_type = codec_type;
+    encoder->gstenc_name = gstenc_name;
     encoder->pipeline = NULL;
 
     if (cbs)

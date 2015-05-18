@@ -111,6 +111,7 @@ static int ticketing_enabled = 1; //Ticketing is enabled by default
 static pthread_mutex_t *lock_cs;
 static long *lock_count;
 uint32_t streaming_video = STREAM_VIDEO_FILTER;
+
 spice_image_compression_t image_compression = SPICE_IMAGE_COMPRESS_AUTO_GLZ;
 spice_wan_compression_t jpeg_state = SPICE_WAN_COMPRESSION_AUTO;
 spice_wan_compression_t zlib_glz_state = SPICE_WAN_COMPRESSION_AUTO;
@@ -3669,6 +3670,13 @@ SPICE_GNUC_VISIBLE int spice_server_set_streaming_video(SpiceServer *s, int valu
     streaming_video = value;
     red_dispatcher_on_sv_change();
     return 0;
+}
+
+SPICE_GNUC_VISIBLE int spice_server_set_video_codecs(SpiceServer *s, const char* video_codecs)
+{
+    spice_assert(reds == s);
+
+    return red_dispatcher_set_video_codecs(video_codecs) ? 0 : -1;
 }
 
 SPICE_GNUC_VISIBLE int spice_server_set_playback_compression(SpiceServer *s, int enable)
