@@ -49,7 +49,7 @@ typedef struct MJpegEncoderStats {
     double avg_quality;
 } MJpegEncoderStats;
 
-MJpegEncoder *mjpeg_encoder_new(int bit_rate_control, uint64_t starting_bit_rate,
+MJpegEncoder *mjpeg_encoder_new(uint64_t starting_bit_rate,
                                 MJpegEncoderRateControlCbs *cbs, void *opaque);
 void mjpeg_encoder_destroy(MJpegEncoder *encoder);
 

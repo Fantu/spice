@@ -3100,9 +3100,9 @@ static void red_display_create_stream(DisplayChannelClient *dcc, Stream *stream)
         mjpeg_cbs.update_client_playback_delay = red_stream_update_client_playback_latency;
 
         initial_bit_rate = red_stream_get_initial_bit_rate(dcc, stream);
-        agent->mjpeg_encoder = mjpeg_encoder_new(TRUE, initial_bit_rate, &mjpeg_cbs, agent);
+        agent->mjpeg_encoder = mjpeg_encoder_new(initial_bit_rate, &mjpeg_cbs, agent);
     } else {
-        agent->mjpeg_encoder = mjpeg_encoder_new(FALSE, 0, NULL, NULL);
+        agent->mjpeg_encoder = mjpeg_encoder_new(0, NULL, NULL);
     }
     red_channel_client_pipe_add(&dcc->common.base, &agent->create_item);
 
