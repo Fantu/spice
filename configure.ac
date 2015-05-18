@@ -91,6 +91,15 @@ if test "x$enable_smartcard" = "xyes"; then
    AC_DEFINE([USE_SMARTCARD], [1], [Define if supporting smartcard proxying])
 fi
 
+AC_ARG_ENABLE(gstreamer-0.10,
+[  --enable-gstreamer-0.10   Enable GStreamer 0.10 support],,
+[enable_gstreamer_0_10="yes"])
+AS_IF([test x"$enable_gstreamer_0_10" != "xno"], [enable_gstreamer_0_10="yes"])
+AM_CONDITIONAL(SUPPORT_GSTREAMER_0_10, test "x$enable_gstreamer_0_10" != "xno")
+if test "x$enable_gstreamer_0_10" = "xyes"; then
+   AC_DEFINE([HAVE_GSTREAMER_0_10], [1], [Define if supporting GStreamer 0.10])
+fi
+
 AC_ARG_ENABLE(automated_tests,
 [  --enable-automated-tests     Enable automated tests using spicy-screenshot (part of spice--gtk)],,
 [enable_automated_tests="no"])
@@ -125,6 +134,13 @@ if test "x$enable_smartcard" = "xyes"; then
     AC_SUBST(SMARTCARD_LIBS)
     AC_SUBST(SMARTCARD_CFLAGS)
     AS_VAR_APPEND([SPICE_REQUIRES], [" libcacard >= 0.1.2"])
+fi
+
+if test "x$enable_gstreamer_0_10" = "xyes"; then
+    PKG_CHECK_MODULES(GSTREAMER_0_10, [gstreamer-0.10, gstreamer-app-0.10])
+    AC_SUBST(GSTREAMER_0_10_LIBS)
+    AC_SUBST(GSTREAMER_0_10_CFLAGS)
+    AS_VAR_APPEND([SPICE_REQUIRES], [" gstreamer-0.10"])
 fi
 
 
@@ -358,6 +374,8 @@ echo "
         LZ4 support:              ${enable_lz4}
 
         Smartcard:                ${enable_smartcard}
+
+        GStreamer-0.10:           ${enable_gstreamer-0.10}
 
         SASL support:             ${enable_sasl}
 

@@ -48,8 +48,8 @@ struct VideoEncoder {
      *
      * @encoder:   The video encoder.
      * @bitmap:    The Spice screen.
-     * @width:     The width of the Spice screen.
-     * @height:    The heigth of the Spice screen.
+     * @width:     The width of the Spice screen. FIXME: Wrong?
+     * @height:    The heigth of the Spice screen. FIXME: Wrong?
      * @src:       A rectangle specifying the area occupied by the video.
      * @top_down:  If true the first video line is specified by src.top.
      * @outbuf:    The buffer for the compressed frame. This must either be
@@ -155,8 +155,14 @@ typedef struct VideoEncoderRateControlCbs {
  * @return:            A pointer to a structure implementing the VideoEncoder
  *                     methods.
  */
+typedef VIDEO_ENCODER_T* (*create_video_encoder_proc)(uint64_t starting_bit_rate, VideoEncoderRateControlCbs *cbs, void *cbs_opaque);
+
 VIDEO_ENCODER_T* create_mjpeg_encoder(uint64_t starting_bit_rate,
                                       VideoEncoderRateControlCbs *cbs,
                                       void *cbs_opaque);
+
+VIDEO_ENCODER_T* create_gstreamer_encoder(uint64_t starting_bit_rate,
+                                          VideoEncoderRateControlCbs *cbs,
+                                          void *cbs_opaque);
 
 #endif
