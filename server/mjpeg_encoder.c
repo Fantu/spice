@@ -607,9 +607,7 @@ static void mjpeg_encoder_adjust_params_to_bit_rate(MJpegEncoder *encoder)
     uint32_t latency = 0;
     uint32_t src_fps;
 
-    if (!encoder->rate_control_is_active) {
-        return;
-    }
+    spice_assert(encoder->rate_control_is_active);
 
     rate_control = &encoder->rate_control;
     quality_eval = &rate_control->quality_eval_data;
@@ -694,9 +692,8 @@ static void mjpeg_encoder_adjust_fps(MJpegEncoder *encoder, uint64_t now)
     MJpegEncoderRateControl *rate_control = &encoder->rate_control;
     uint64_t adjusted_fps_time_passed;
 
-    if (!encoder->rate_control_is_active) {
-        return;
-    }
+    spice_assert(encoder->rate_control_is_active);
+
     adjusted_fps_time_passed = (now - rate_control->adjusted_fps_start_time) / 1000 / 1000;
 
     if (!rate_control->during_quality_eval &&
