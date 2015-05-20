@@ -268,12 +268,14 @@ static create_video_encoder_proc video_encoder_procs[] = {
 static const EnumNames video_codec_names[] = {
     {SPICE_VIDEO_CODEC_TYPE_MJPEG, "mjpeg"},
     {SPICE_VIDEO_CODEC_TYPE_VP8, "vp8"},
+    {SPICE_VIDEO_CODEC_TYPE_H264, "h264"},
     {0, NULL},
 };
 
 static const EnumNames video_cap_names[] = {
     {SPICE_DISPLAY_CAP_CODEC_MJPEG, "mjpeg"},
     {SPICE_DISPLAY_CAP_CODEC_VP8, "vp8"},
+    {SPICE_DISPLAY_CAP_CODEC_H264, "h264"},
     {0, NULL},
 };
 

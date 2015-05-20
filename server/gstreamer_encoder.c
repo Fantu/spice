@@ -204,6 +204,9 @@ static gboolean construct_pipeline(GstEncoder *encoder, const SpiceBitmap *bitma
     case SPICE_VIDEO_CODEC_TYPE_VP8:
         gstenc_name = "vp8enc";
         break;
+    case SPICE_VIDEO_CODEC_TYPE_H264:
+        gstenc_name = "x264enc";
+        break;
     default:
         spice_warning("unsupported codec type %d", encoder->base.codec_type);
         return FALSE;
@@ -252,6 +255,17 @@ static gboolean construct_pipeline(GstEncoder *encoder, const SpiceBitmap *bitma
 #endif
                      "resize-allowed", TRUE,
                      "threads", g_get_num_processors() - 1,
+                     NULL);
+        break;
+    case SPICE_VIDEO_CODEC_TYPE_H264:
+        g_object_set(G_OBJECT(encoder->gstenc),
+                     "bitrate", encoder->bit_rate / 1024,
+                     "byte-stream", TRUE,
+                     "aud", FALSE,
+                     "tune", 4, /* Zero latency */
+                     "intra-refresh", TRUE,
+                     "sliced-threads", TRUE,
+                     "speed-preset", 1, /* ultrafast */
                      NULL);
         break;
     default:
@@ -587,7 +601,8 @@ GstEncoder *create_gstreamer_encoder(SpiceVideoCodecType codec_type, uint64_t st
 
     spice_assert(!cbs || (cbs && cbs->get_roundtrip_ms && cbs->get_source_fps));
     if (codec_type != SPICE_VIDEO_CODEC_TYPE_MJPEG &&
-        codec_type != SPICE_VIDEO_CODEC_TYPE_VP8) {
+        codec_type != SPICE_VIDEO_CODEC_TYPE_VP8 &&
+        codec_type != SPICE_VIDEO_CODEC_TYPE_H264) {
         spice_warning("unsupported codec type %d", codec_type);
         return NULL;
     }
