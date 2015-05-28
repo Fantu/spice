@@ -81,7 +81,6 @@ libspice_server_la_SOURCES =			\
 	main_channel.c				\
 	main_channel.h				\
 	mjpeg_encoder.c				\
-	mjpeg_encoder.h				\
 	red_bitmap_utils.h			\
 	red_channel.c				\
 	red_channel.h				\
@@ -115,6 +114,7 @@ libspice_server_la_SOURCES =			\
 	spicevmc.c				\
 	spice_timer_queue.c			\
 	spice_timer_queue.h			\
+	video_encoder.h				\
 	zlib_encoder.c				\
 	zlib_encoder.h				\
 	spice_bitmap_utils.h		\
