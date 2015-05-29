@@ -200,8 +200,8 @@ static int construct_pipeline(GstEncoder *encoder, const SpiceBitmap *bitmap)
     if (encoder->base.codec_type == SPICE_VIDEO_CODEC_TYPE_VP8)
         g_object_set(G_OBJECT(encoder->gstenc),
                      "max-latency", 0,
-                     "max-keyframe-distance", 0,
-                     "lag-in-frames", 0,
+                     "speed", 7,
+                     "threads", 4,
                      NULL);
 
     /* Set the source caps */
