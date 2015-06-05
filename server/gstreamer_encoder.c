@@ -33,6 +33,10 @@ typedef struct GstEncoder GstEncoder;
 
 #define DEFAULT_FPS 30
 
+#ifndef HAVE_GSTREAMER_0_10
+# define DO_ZERO_COPY
+#endif
+
 
 typedef struct {
     SpiceBitmapFmt  spice_format;
@@ -64,6 +68,7 @@ struct GstEncoder {
     int height;
     SpiceFormatForGStreamer *format;
     SpiceBitmapFmt spice_format;
+    gboolean needs_bitmap;
 
     /* Rate control information */
     uint64_t bit_rate;
@@ -289,21 +294,28 @@ static void reconfigure_pipeline(GstEncoder *encoder)
     }
 }
 
+#ifdef DO_ZERO_COPY
+static void unref_bitmap(gpointer mem)
+{
+    GstEncoder *encoder = (GstEncoder*)mem;
+    encoder->needs_bitmap = FALSE;
+}
+#endif
+
 static int push_raw_frame(GstEncoder *encoder, const SpiceBitmap *bitmap,
                           const SpiceRect *src, int top_down)
 {
     const uint32_t stream_height = src->bottom - src->top;
     const uint32_t stream_stride = (src->right - src->left) * encoder->format->bpp / 8;
     uint32_t len = stream_stride * stream_height;
-    GstBuffer *buffer = gst_buffer_new_and_alloc(len);
 #ifdef HAVE_GSTREAMER_0_10
+    GstBuffer *buffer = gst_buffer_new_and_alloc(len);
     uint8_t *b = GST_BUFFER_DATA(buffer);
-#else
-    GstMapInfo map;
-    gst_buffer_map(buffer, &map, GST_MAP_WRITE);
-    uint8_t *b = map.data;
-#endif
     uint8_t *dst = b;
+#else
+    GstBuffer *buffer = gst_buffer_new();
+    GstMapInfo map = { .memory = NULL };
+#endif
 
     /* Note that we should not reorder the lines, even if top_down is false.
      * It just changes the number of lines to skip at the start of the bitmap.
@@ -315,6 +327,66 @@ static int push_raw_frame(GstEncoder *encoder, const SpiceBitmap *bitmap,
 
     if (stream_stride == bitmap->stride) {
         /* We can copy the bitmap chunk by chunk */
+#ifdef DO_ZERO_COPY
+        /* We cannot control the lifetime of the bitmap but we can wrap it in
+         * the buffer anyway because:
+         * - Before returning from gst_encoder_encode_frame() we wait for the
+         *   pipeline to have converted this frame into a compressed buffer.
+         *   So it has to have gone through the frame at least once.
+         * - For all encoders but MJPEG, the first element of the pipeline will
+         *   convert the bitmap to another image format which entails copying
+         *   it. So by the time the encoder starts its work, this buffer will
+         *   not be needed anymore.
+         * - The MJPEG encoder does not perform inter-frame compression and thus
+         *   does not need to keep hold of this buffer once it has processed it.
+         */
+        while (chunk_offset >= chunks->chunk[chunk].len) {
+            /* Make sure that the chunk is not padded */
+            if (chunks->chunk[chunk].len % bitmap->stride != 0) {
+                gst_buffer_unref(buffer);
+                return VIDEO_ENCODER_FRAME_UNSUPPORTED;
+            }
+            chunk_offset -= chunks->chunk[chunk].len;
+            chunk++;
+        }
+
+        int max_mem = gst_buffer_get_max_memory();
+        if (chunks->num_chunks - chunk > max_mem) {
+            /* There are more chunks than we can fit memory objects in a
+             * buffer. This will cause the buffer to merge memory objects to
+             * fit the extra chunks, which means doing wasteful memory copies.
+             * So use the zero-copy approach for the first max_mem-1 chunks,
+             * and directly copy the remainder to the last memory object.
+             */
+            max_mem = chunk + max_mem - 1;
+        } else {
+            max_mem = chunks->num_chunks;
+        }
+
+        while (len && chunk < max_mem) {
+            /* Make sure that the chunk is not padded */
+            if (chunks->chunk[chunk].len % bitmap->stride != 0) {
+                gst_buffer_unref(buffer);
+                return VIDEO_ENCODER_FRAME_UNSUPPORTED;
+            }
+            uint32_t thislen = MIN(chunks->chunk[chunk].len - chunk_offset, len);
+            GstMemory *mem = gst_memory_new_wrapped(GST_MEMORY_FLAG_READONLY, chunks->chunk[chunk].data, chunks->chunk[chunk].len, chunk_offset, thislen, encoder, &unref_bitmap);
+            gst_buffer_append_memory(buffer, mem);
+            len -= thislen;
+            chunk_offset = 0;
+            chunk++;
+        }
+        encoder->needs_bitmap = TRUE;
+#endif
+
+#ifndef HAVE_GSTREAMER_0_10
+        if (len) {
+            GstMemory *mem = gst_allocator_alloc(NULL, len, NULL);
+            gst_memory_map(mem, &map, GST_MAP_WRITE);
+        }
+        uint8_t *dst = map.data;
+#endif
+
         while (len && chunk < chunks->num_chunks) {
             /* Make sure that the chunk is not padded */
             if (chunks->chunk[chunk].len % bitmap->stride != 0) {
@@ -341,6 +413,13 @@ static int push_raw_frame(GstEncoder *encoder, const SpiceBitmap *bitmap,
         /* We have to do a line-by-line copy because for each we have to leave
          * out pixels on the left or right.
          */
+#ifndef HAVE_GSTREAMER_0_10
+        GstMemory *mem = gst_allocator_alloc(NULL, len, NULL);
+        gst_memory_map(mem, &map, GST_MAP_WRITE);
+        uint8_t *b = map.data;
+        uint8_t *dst = b;
+#endif
+
         chunk_offset += src->left * encoder->format->bpp / 8;
         for (int l = 0; l < stream_height; l++) {
             /* We may have to move forward by more than one chunk the first
@@ -364,10 +443,13 @@ static int push_raw_frame(GstEncoder *encoder, const SpiceBitmap *bitmap,
         }
         spice_assert(dst - b == len);
     }
-#ifdef HAVE_GSTREAMER_0_10
-    gst_buffer_set_caps(buffer, encoder->src_caps);
+#ifndef HAVE_GSTREAMER_0_10
+    if (map.memory) {
+        gst_memory_unmap(map.memory, &map);
+        gst_buffer_append_memory(buffer, map.memory);
+    }
 #else
-    gst_buffer_unmap(buffer, &map);
+    gst_buffer_set_caps(buffer, encoder->src_caps);
 #endif
     GST_BUFFER_OFFSET(buffer) = encoder->frame++;
 
@@ -455,6 +537,8 @@ static int gst_encoder_encode_frame(GstEncoder *encoder,
     rc = push_raw_frame(encoder, bitmap, src, top_down);
     if (rc == VIDEO_ENCODER_FRAME_ENCODE_DONE) {
         rc = pull_compressed_buffer(encoder, outbuf, outbuf_size, data_size);
+        /* GStreamer should have released the source frame buffer by now */
+        spice_assert(!encoder->needs_bitmap);
     }
     return rc;
 }
