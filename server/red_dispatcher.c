@@ -258,7 +258,7 @@ static const EnumNames video_encoder_names[] = {
 
 static create_video_encoder_proc video_encoder_procs[] = {
     &create_mjpeg_encoder,
-#ifdef HAVE_GSTREAMER_0_10
+#if defined(HAVE_GSTREAMER_0_10) || defined(HAVE_GSTREAMER_1_0)
     &create_gstreamer_encoder,
 #else
     NULL,
