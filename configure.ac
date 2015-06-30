@@ -80,6 +80,31 @@ AS_IF([test x"$enable_opengl" != "xno"], [
 SPICE_CHECK_SMARTCARD([SMARTCARD])
 AM_CONDITIONAL(SUPPORT_SMARTCARD, test "x$have_smartcard" = "xyes")
 
+AC_ARG_ENABLE(gstreamer,
+              AS_HELP_STRING([--enable-gstreamer=@<:@auto/yes/no@:>@],
+                             [Enable GStreamer 0.10 support]),
+              [],
+              [enable_gstreamer="auto"])
+
+if test "x$enable_gstreamer" != "xno"; then
+    PKG_CHECK_MODULES(GSTREAMER_0_10, [gstreamer-0.10, gstreamer-app-0.10],
+                      [enable_gstreamer="yes"
+                       have_gstreamer_0_10="yes"],
+                      [have_gstreamer_0_10="no"])
+    if test "x$have_gstreamer_0_10" = "xyes"; then
+        AC_SUBST(GSTREAMER_0_10_CFLAGS)
+        AC_SUBST(GSTREAMER_0_10_LIBS)
+        AS_VAR_APPEND([SPICE_REQUIRES], [" gstreamer-0.10 gstreamer-app-0.10"])
+        AC_DEFINE([HAVE_GSTREAMER_0_10], [1], [Define if supporting GStreamer 0.10])
+    elif test "x$enable_gstreamer" = "xyes"; then
+        AC_MSG_ERROR([GStreamer 0.10 support requested but not found. You may set GSTREAMER_0_10_CFLAGS and GSTREAMER_0_10_LIBS to avoid the need to call pkg-config.])
+    fi
+else
+    have_gstreamer_0_10="no"
+fi
+AM_CONDITIONAL(SUPPORT_GSTREAMER_0_10, test "x$have_gstreamer_0_10" = "xyes")
+
+
 AC_ARG_ENABLE([automated_tests],
               AS_HELP_STRING([--enable-automated-tests], [Enable automated tests using spicy-screenshot (part of spice--gtk)]),,
               [enable_automated_tests="no"])

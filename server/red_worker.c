@@ -3082,6 +3082,7 @@ static void red_stream_update_client_playback_latency(void *opaque, uint32_t del
 static void red_display_create_stream(DisplayChannelClient *dcc, Stream *stream)
 {
     StreamAgent *agent = &dcc->stream_agents[get_stream_id(dcc->common.worker, stream)];
+    create_video_encoder_proc create_video_encoder;
 
     stream->refs++;
     spice_assert(region_is_empty(&agent->vis_region));
@@ -3096,6 +3097,12 @@ static void red_display_create_stream(DisplayChannelClient *dcc, Stream *stream)
     agent->fps = MAX_FPS;
     agent->dcc = dcc;
 
+#ifdef HAVE_GSTREAMER_0_10
+    create_video_encoder = &create_gstreamer_encoder;
+#else
+    create_video_encoder = &create_mjpeg_encoder;
+#endif
+
     if (dcc->use_video_encoder_rate_control) {
         VideoEncoderRateControlCbs video_cbs;
         uint64_t initial_bit_rate;
@@ -3105,9 +3112,9 @@ static void red_display_create_stream(DisplayChannelClient *dcc, Stream *stream)
         video_cbs.update_client_playback_delay = red_stream_update_client_playback_latency;
 
         initial_bit_rate = red_stream_get_initial_bit_rate(dcc, stream);
-        agent->video_encoder = create_mjpeg_encoder(initial_bit_rate, &video_cbs, agent);
+        agent->video_encoder = create_video_encoder(initial_bit_rate, &video_cbs, agent);
     } else {
-        agent->video_encoder = create_mjpeg_encoder(0, NULL, NULL);
+        agent->video_encoder = create_video_encoder(0, NULL, NULL);
     }
     red_channel_client_pipe_add(&dcc->common.base, &agent->create_item);
 
