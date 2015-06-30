@@ -3681,6 +3681,18 @@ SPICE_GNUC_VISIBLE int spice_server_set_streaming_video(SpiceServer *s, int valu
     return 0;
 }
 
+SPICE_GNUC_VISIBLE int spice_server_set_video_codecs(SpiceServer *s, const char* video_codecs)
+{
+    spice_assert(reds == s);
+
+    if (!red_dispatcher_set_video_codecs(video_codecs)) {
+        return -1;
+    }
+
+    red_dispatcher_on_vc_change();
+    return 0;
+}
+
 SPICE_GNUC_VISIBLE int spice_server_set_playback_compression(SpiceServer *s, int enable)
 {
     spice_assert(reds == s);

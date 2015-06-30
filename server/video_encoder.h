@@ -119,6 +119,9 @@ struct VideoEncoder {
      *              statistics.
      */
     void (*get_stats)(VIDEO_ENCODER_T *encoder, VideoEncoderStats *stats);
+
+    /* The codec being used by the video encoder */
+    SpiceVideoCodecType codec_type;
 };
 
 
@@ -146,23 +149,28 @@ typedef struct VideoEncoderRateControlCbs {
 } VideoEncoderRateControlCbs;
 
 
-/* Instantiates the builtin MJPEG video encoder.
+/* Instantiates the a video encoder for the specified codec.
  *
- * @starting_bit_rate: An initial estimate of the available stream bit rate .
+ * @codec_type:        The codec to use.
+ * @starting_bit_rate: An initial estimate of the available stream bit rate.
  * @bit_rate_control:  True if the client supports rate control.
  * @cbs:               A set of callback methods to be used for rate control.
  * @cbs_opaque:        A pointer to be passed to the rate control callbacks.
  * @return:            A pointer to a structure implementing the VideoEncoder
  *                     methods.
  */
-typedef VIDEO_ENCODER_T* (*create_video_encoder_proc)(uint64_t starting_bit_rate, VideoEncoderRateControlCbs *cbs, void *cbs_opaque);
+typedef VIDEO_ENCODER_T* (*create_video_encoder_proc)(SpiceVideoCodecType codec_type, uint64_t starting_bit_rate, VideoEncoderRateControlCbs *cbs, void *cbs_opaque);
 
-VIDEO_ENCODER_T* create_mjpeg_encoder(uint64_t starting_bit_rate,
+VIDEO_ENCODER_T* create_mjpeg_encoder(SpiceVideoCodecType codec_type,
+                                      uint64_t starting_bit_rate,
                                       VideoEncoderRateControlCbs *cbs,
                                       void *cbs_opaque);
 
-VIDEO_ENCODER_T* create_gstreamer_encoder(uint64_t starting_bit_rate,
+VIDEO_ENCODER_T* create_gstreamer_encoder(SpiceVideoCodecType codec_type,
+                                          uint64_t starting_bit_rate,
                                           VideoEncoderRateControlCbs *cbs,
                                           void *cbs_opaque);
+
+#define VIDEO_ENCODER_DEFAULT_PREFERENCE "spice:mjpeg;gstreamer:mjpeg;gstreamer:vp8"
 
 #endif

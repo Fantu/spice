@@ -1,6 +1,7 @@
 /* -*- Mode: C; c-basic-offset: 4; indent-tabs-mode: nil -*- */
 /*
    Copyright (C) 2009 Red Hat, Inc.
+   Copyright (C) 2015 Francois Gouget
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Lesser General Public
@@ -993,6 +994,8 @@ typedef struct RedWorker {
     uint32_t mouse_mode;
 
     uint32_t streaming_video;
+    uint32_t num_video_codecs;
+    RedVideoCodec video_codecs[RED_MAX_VIDEO_CODECS];
     Stream streams_buf[NUM_STREAMS];
     Stream *free_streams;
     Ring streams;
@@ -3079,10 +3082,44 @@ static void red_stream_update_client_playback_latency(void *opaque, uint32_t del
     main_dispatcher_set_mm_time_latency(agent->dcc->common.base.client, agent->dcc->streams_max_latency);
 }
 
+static VideoEncoder* red_display_create_video_encoder(DisplayChannelClient *dcc, uint64_t starting_bit_rate, VideoEncoderRateControlCbs *cbs, void *cbs_opaque)
+{
+    RedWorker* worker = dcc->common.worker;
+    int i;
+    int client_has_multi_codec = red_channel_client_test_remote_cap(&dcc->common.base, SPICE_DISPLAY_CAP_MULTI_CODEC);
+
+    for (i = 0; i < worker->num_video_codecs; i++) {
+        RedVideoCodec* video_codec = &worker->video_codecs[i];
+        VideoEncoder* video_encoder;
+
+        if (!client_has_multi_codec &&
+            video_codec->type != SPICE_VIDEO_CODEC_TYPE_MJPEG) {
+            /* Old clients only support MJPEG */
+            continue;
+        }
+        if (client_has_multi_codec &&
+            !red_channel_client_test_remote_cap(&dcc->common.base, video_codec->cap)) {
+            /* The client is recent but does not support this codec */
+            continue;
+        }
+
+        video_encoder = video_codec->create(video_codec->type, starting_bit_rate, cbs, cbs_opaque);
+        if (video_encoder) {
+            return video_encoder;
+        }
+    }
+
+    /* Try to use the builtin MJPEG video encoder as a fallback */
+    if (!client_has_multi_codec || red_channel_client_test_remote_cap(&dcc->common.base, SPICE_DISPLAY_CAP_CODEC_MJPEG)) {
+        return create_mjpeg_encoder(SPICE_VIDEO_CODEC_TYPE_MJPEG, starting_bit_rate, cbs, cbs_opaque);
+    }
+
+    return NULL;
+}
+
 static void red_display_create_stream(DisplayChannelClient *dcc, Stream *stream)
 {
     StreamAgent *agent = &dcc->stream_agents[get_stream_id(dcc->common.worker, stream)];
-    create_video_encoder_proc create_video_encoder;
 
     stream->refs++;
     spice_assert(region_is_empty(&agent->vis_region));
@@ -3097,12 +3134,6 @@ static void red_display_create_stream(DisplayChannelClient *dcc, Stream *stream)
     agent->fps = MAX_FPS;
     agent->dcc = dcc;
 
-#ifdef HAVE_GSTREAMER_0_10
-    create_video_encoder = &create_gstreamer_encoder;
-#else
-    create_video_encoder = &create_mjpeg_encoder;
-#endif
-
     if (dcc->use_video_encoder_rate_control) {
         VideoEncoderRateControlCbs video_cbs;
         uint64_t initial_bit_rate;
@@ -3112,10 +3143,13 @@ static void red_display_create_stream(DisplayChannelClient *dcc, Stream *stream)
         video_cbs.update_client_playback_delay = red_stream_update_client_playback_latency;
 
         initial_bit_rate = red_stream_get_initial_bit_rate(dcc, stream);
-        agent->video_encoder = create_video_encoder(initial_bit_rate, &video_cbs, agent);
+        agent->video_encoder = red_display_create_video_encoder(dcc, initial_bit_rate, &video_cbs, agent);
     } else {
-        agent->video_encoder = create_video_encoder(0, NULL, NULL);
+        agent->video_encoder = red_display_create_video_encoder(dcc, 0, NULL, NULL);
     }
+    /* FIXME: We may have failed to create a video encoder which will cause
+     *        a crash!
+     */
     red_channel_client_pipe_add(&dcc->common.base, &agent->create_item);
 
     if (red_channel_client_test_remote_cap(&dcc->common.base, SPICE_DISPLAY_CAP_STREAM_REPORT)) {
@@ -8929,7 +8963,7 @@ static void red_display_marshall_stream_start(RedChannelClient *rcc,
     stream_create.surface_id = 0;
     stream_create.id = get_stream_id(dcc->common.worker, stream);
     stream_create.flags = stream->top_down ? SPICE_STREAM_FLAGS_TOP_DOWN : 0;
-    stream_create.codec_type = SPICE_VIDEO_CODEC_TYPE_MJPEG;
+    stream_create.codec_type = agent->video_encoder->codec_type;
 
     stream_create.src_width = stream->width;
     stream_create.src_height = stream->height;
@@ -11721,6 +11755,15 @@ void handle_dev_set_streaming_video(void *opaque, void *payload)
     }
 }
 
+void handle_dev_set_video_codecs(void *opaque, void *payload)
+{
+    RedWorkerMessageSetVideoCodecs *msg = payload;
+    RedWorker *worker = opaque;
+
+    worker->num_video_codecs = msg->num_video_codecs;
+    memcpy(worker->video_codecs, msg->video_codecs, sizeof(worker->video_codecs));
+}
+
 void handle_dev_set_mouse_mode(void *opaque, void *payload)
 {
     RedWorkerMessageSetMouseMode *msg = payload;
@@ -12027,6 +12070,8 @@ static void red_init(RedWorker *worker, WorkerInitData *init_data)
     worker->jpeg_state = init_data->jpeg_state;
     worker->zlib_glz_state = init_data->zlib_glz_state;
     worker->streaming_video = init_data->streaming_video;
+    worker->num_video_codecs = init_data->num_video_codecs;
+    memcpy(worker->video_codecs, init_data->video_codecs, sizeof(worker->video_codecs));
     worker->driver_cap_monitors_config = 0;
     ring_init(&worker->current_list);
     image_cache_init(&worker->image_cache);

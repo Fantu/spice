@@ -32,6 +32,7 @@ global:
     spice_server_set_playback_compression;
     spice_server_set_port;
     spice_server_set_streaming_video;
+    spice_server_set_video_codecs;
     spice_server_set_ticket;
     spice_server_set_tls;
     spice_server_set_zlib_glz_compression;
